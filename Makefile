@@ -1,17 +1,17 @@
-all: main
+all: a.out
 
-main: main.go
-	go build main.go
+a.out: main.cpp
+	g++ -Wall -Wextra main.cpp -lpcap
 
 .PHONY: run
 
-run: main
-	sudo ./main "" res.txt
+run: a.out
+	sudo ./a.out "" res.txt
 
 .PHONY: clean
 
 clean:
-	$(RM) main *.txt
+	$(RM) *.txt *.out
 
 .PHONY: check
 
