@@ -1,7 +1,7 @@
 all: a.out
 
 a.out: main.cpp
-	g++ -Wall -Wextra main.cpp -lpcap -fsanitize=address
+	g++ -Wall main.cpp -lpcap -fsanitize=address
 
 .PHONY: run
 

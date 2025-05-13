@@ -3,6 +3,12 @@
 #include <fstream>
 #include <csignal>
 #include <vector>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
+#include <netinet/ip_icmp.h>
+#include <arpa/inet.h>
+#include <net/ethernet.h>
 #include <string>
 #include <iomanip>
 
@@ -60,12 +66,59 @@ void print_packet_char(const int len, const u_char *packet)
     }
 }
 
+void get_packet_info(const struct pcap_pkthdr *header, const u_char *packet)
+{
+    const struct ether_header *eth_header = (struct ether_header *)packet;
+    if (ntohs(eth_header->ether_type) != ETHERTYPE_IP)
+        return;
+
+    const struct ip *ip_hdr = (struct ip *)(packet + sizeof(struct ether_header));
+
+    std::string src_ip = inet_ntoa(ip_hdr->ip_src);
+    std::string dst_ip = inet_ntoa(ip_hdr->ip_dst);
+    u_int8_t protocol = ip_hdr->ip_p;
+
+    output_file << "Протокол: ";
+    switch (protocol)
+    {
+    case IPPROTO_TCP:
+        output_file << "TCP";
+        break;
+    case IPPROTO_UDP:
+        output_file << "UDP";
+        break;
+    case IPPROTO_ICMP:
+        output_file << "ICMP";
+        break;
+    default:
+        output_file << "Неизвестный";
+    }
+
+    output_file << " | Src IP: " << src_ip << " | Dst IP: " << dst_ip;
+
+    if (protocol == IPPROTO_TCP)
+    {
+        const struct tcphdr *tcp_hdr = (struct tcphdr *)(packet + sizeof(struct ether_header) + ip_hdr->ip_hl * 4);
+        output_file << " | Src Port: " << ntohs(tcp_hdr->th_sport)
+                  << " | Dst Port: " << ntohs(tcp_hdr->th_dport);
+    }
+    else if (protocol == IPPROTO_UDP)
+    {
+        const struct udphdr *udp_hdr = (struct udphdr *)(packet + sizeof(struct ether_header) + ip_hdr->ip_hl * 4);
+        output_file << " | Src Port: " << ntohs(udp_hdr->uh_sport)
+                  << " | Dst Port: " << ntohs(udp_hdr->uh_dport);
+    }
+
+    output_file << "\n\n";
+}
+
 void packet_handler(u_char *user, const struct pcap_pkthdr *header, const u_char *packet)
 {
     matched_packets++;
     std::cout << "Найден подходящий пакет " << matched_packets << "\n";
     output_file << "\nПакет " << std::dec << matched_packets << "\n";
-    output_file << "Размер пакета: " << header->len << " байт \n\n";
+    output_file << "Размер пакета: " << header->len << " байт \n";
+    get_packet_info(header, packet);
     print_packet_int(header->len, packet);
     output_file << "\n\n";
     print_packet_char(header->len, packet);
