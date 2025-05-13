@@ -9,6 +9,7 @@
 std::ofstream output_file;
 char *filename = nullptr;
 char *filter = nullptr;
+bpf_program fp;
 int matched_packets = 0;
 int dropped_packets = 0;
 pcap_t *handle;
@@ -19,11 +20,10 @@ void handle_sigint(int sig)
     {
         if (handle)
         {
-            struct pcap_stat *ps = new pcap_stat;
-            pcap_stats(handle, ps);
-            dropped_packets = ps->ps_drop;
+            struct pcap_stat ps;
+            pcap_stats(handle, &ps);
+            dropped_packets = (&ps)->ps_drop;
             pcap_close(handle);
-            delete ps;
         }
         if (output_file.is_open())
         {
@@ -31,6 +31,7 @@ void handle_sigint(int sig)
         }
         std::cout << "\rЗахват пакетов остановлен. Принято: " << matched_packets << ". Отброшено: " << dropped_packets << "\n";
         std::cout << "Сохранено в файл " << filename << "\n\n\n";
+        pcap_freecode(&fp);
         exit(0);
     }
 }
@@ -49,7 +50,7 @@ void print_packet_char(const int len, const u_char *packet)
 {
     for (int i = 0; i < len; ++i)
     {
-        if (packet[i] <= 127)
+        if (packet[i] < 128 && packet[i] > 32)
             output_file << std::setw(2) << packet[i] << " ";
         else
             output_file << ".." << " ";
@@ -64,7 +65,7 @@ void packet_handler(u_char *user, const struct pcap_pkthdr *header, const u_char
     matched_packets++;
     std::cout << "Найден подходящий пакет " << matched_packets << "\n";
     output_file << "\nПакет " << std::dec << matched_packets << "\n";
-    output_file << "Размер пакета: " << header->len << "\n";
+    output_file << "Размер пакета: " << header->len << " байт \n\n";
     print_packet_int(header->len, packet);
     output_file << "\n\n";
     print_packet_char(header->len, packet);
@@ -84,7 +85,7 @@ int check_args(int argc, char *argv[])
     return 0;
 }
 
-const char *pick_interface()
+std::string pick_interface()
 {
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_if_t *alldevs;
@@ -93,7 +94,7 @@ const char *pick_interface()
     if (pcap_findalldevs(&alldevs, errbuf) == -1)
     {
         std::cerr << "Не найдены сетевые интерфейсы: " << errbuf << "\n";
-        return nullptr;
+        return "";
     }
 
     std::cout << "Доступные интерфейсы:\n";
@@ -108,7 +109,7 @@ const char *pick_interface()
     if (device_names.empty())
     {
         std::cerr << "Нет доступных интерфейсов для захвата.\n";
-        return nullptr;
+        return "";
     }
 
     int choice;
@@ -121,13 +122,11 @@ const char *pick_interface()
         return nullptr;
     }
     pcap_freealldevs(alldevs);
-    return device_names[choice - 1].c_str();
+    return device_names[choice - 1];
 }
 
 int set_bpf_filter(bpf_u_int32 net)
 {
-
-    bpf_program fp;
 
     if (pcap_compile(handle, &fp, filter, 0, net) == -1)
     {
@@ -149,20 +148,19 @@ int main(int argc, char *argv[])
         return 1;
 
     char errbuf[PCAP_ERRBUF_SIZE];
-    const char *dev = pick_interface();
+    std::string dev = pick_interface();
+    if (dev.empty())
+        return 1;
 
-    handle = pcap_open_live(dev, BUFSIZ, 1, 1000, errbuf);
+    handle = pcap_open_live(dev.c_str(), BUFSIZ, 1, 1000, errbuf);
     if (handle == nullptr)
     {
         std::cerr << "Не удалось открыть сетевой интерфейс: " << errbuf << "\n";
         return 1;
     }
-    if (pcap_datalink(handle))
-    {
-    }
 
     bpf_u_int32 net, mask;
-    if (pcap_lookupnet(dev, &net, &mask, errbuf) == -1)
+    if (pcap_lookupnet(dev.c_str(), &net, &mask, errbuf) == -1)
     {
         net = 0;
         mask = 0;
@@ -173,7 +171,7 @@ int main(int argc, char *argv[])
     if (set_bpf_filter(net) != 0)
         return 1;
 
-    output_file.open(filename, std::ios::app);
+    output_file.open(filename, std::ios::out);
     if (!output_file.is_open())
     {
         std::cerr << "Не удалось открыть файл для записи\n";
